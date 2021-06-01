@@ -5,6 +5,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 import csv
 import sys
 
+# Data object to hold each individual result
 class Result:
     def __init__(self, event, time , date, meet, placement):
         self.__event = event
@@ -20,10 +21,10 @@ class Result:
     def __str__(self):
         return f'{self.__event}, {self.__time}, {self.__placement}, {self.__date[3:]}, {self.__meet}\n'
 
-
+# Data object to hold each athlete with an array of results 
 class Athlete:
     def __init__(self, name):
-        self.__name = name
+        self.__name = name.replace(',','')
         self.__results = []
 
     def getName(self):
@@ -47,57 +48,81 @@ class Athlete:
             athleteString = athleteString + result
         return athleteString
 
-outputLocation = 'results.csv'
-if len(sys.argv) > 1:
-    outputLocation = sys.argv[1]
- 
+# Setup selenium driver using chrome
 DRIVER_PATH = '/usr/local/bin/chromedriver'
 driver = webdriver.Chrome(executable_path=DRIVER_PATH)
-# driver.get('https://www.tfrrs.org/teams/NH_college_m_Dartmouth.html')
-driver.get('https://www.tfrrs.org/teams/NH_college_f_Dartmouth.html')
 
+# IMPORTANT: uncomment/comment below to swap between men and women's result scraping
+
+# driver.get('https://www.tfrrs.org/teams/NH_college_m_Dartmouth.html')
+driver.get('https://www.tfrrs.org/teams/NH_college_m_Dartmouth.html')
+
+# Once we have navigated to the team page, pull all of the tables on the page 
 all_tables = driver.find_elements(By.TAG_NAME, 'table')
+# The second table in our array is our team results
 teamResults = all_tables[1]
-athletes = []
+# Pull out all of the links in the team results table, these will be our athlete names
+# as well as our links to each athlete's individual results
 links = teamResults.find_elements(By.TAG_NAME, 'a')
+
+athletes = []
 for link in links:
+    # make sure we are in the team homepage tab when we start each iteration
     driver.switch_to.window(driver.window_handles[0])
-    athlete = Athlete(link.text.replace(',',''))
+    # create a new athlete object with the text from the link (i.e their name)
+    # Note: the constructor parses out the ',' to prevent malformating in the csv
+    athlete = Athlete(link.text)
+    # open the link to the athlete's results in a new tab
     builder = ActionChains(driver);
     openLinkInNewTab = builder.key_down(Keys.COMMAND).click(link).key_up(Keys.COMMAND);
     openLinkInNewTab.perform();
+    # switch to the newly opened tab
     driver.switch_to.window(driver.window_handles[1])
 
-
+    # navigate to the list of the specific athlete's results 
     athleteResults = driver.find_element(By.CSS_SELECTOR, '#meet-results')
+    # collect all of the meets, each meet is its own table
     meets = athleteResults.find_elements(By.TAG_NAME, 'table')
     for meet in meets:
         # Get the title and date of the meet
         header = meet.find_element(By.TAG_NAME, 'thead')
         meetTitle = header.find_element(By.TAG_NAME, 'a').text
         meetDate = header.find_element(By.TAG_NAME, 'span').text
-        
+       
+        # the body of the table contains the rows of events
         body = meet.find_element(By.TAG_NAME, 'tbody')
         events = body.find_elements(By.TAG_NAME, 'tr')
         for event in events:
             data = event.find_elements(By.TAG_NAME, 'td')
+            # each row is split into 3 data parts, event name, time, and placement
             eventName = data[0].text
             eventTime = data[1].find_element(By.TAG_NAME, 'a').text
             eventPlacement = data[2].text
+
+            # create a new result with the scraped info and add it to the athlete's array of results
             resultObject = Result(eventName, eventTime, meetDate, meetTitle, eventPlacement) 
             athlete.addResult(resultObject)
+    # Add our athlete to the array of athletes after we have iterated through all of their races
     athletes.append(athlete)
     driver.close()
 
+# Check sys arguments to decide where to write our data to 
+outputLocation = 'results.csv'
+if len(sys.argv) > 1:
+    outputLocation = sys.argv[1]
 print(f'Output Location is set to: {outputLocation}')
+
+#Create the csv file to write to
 with open(outputLocation, 'x') as csvfile:
-    filewriter = csv.writer(csvfile, delimiter=',',
-                            quotechar='|', quoting=csv.QUOTE_MINIMAL)
+    filewriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+    # These are our column headers
     filewriter.writerow(['Athlete', 'Event', 'Time', 'Placement', 'Meet', 'Date'])
+    # Iterate through each athlete and build one row for each result
     for athlete in athletes:
         name = athlete.getName()
         for result in athlete.getResults():
             row = []
             row.append(name)
             row = row + result.getArrayForm()
+            # Write to our csv file with the current row
             filewriter.writerow(row)
